@@ -2,118 +2,98 @@
 //  ViewController.m
 //  MediaToAlbum
 //
-//  Created by 马汝军 on 15/9/18.
-//  Copyright © 2015年 marujun. All rights reserved.
+//  Created by 马汝军 on 2016/9/25.
+//  Copyright © 2016年 JiZhi. All rights reserved.
 //
 
 #import "ViewController.h"
-
-#define PROGRESS_VIEW_WIDTH     250
-#define PROGRESS_VIEW_HEIGHT    40
-
-#define TIPS_LBL_WIDHT          200
-#define TIPS_LBL_HEIGHT         70
-#define TIPS_LBL_TOP_MARGIN     20
+#import "ZipArchive.h"
+#import "USImagePickerController.h"
 
 @interface ViewController ()
-{
-    UIButton            *_btn;
-    UIProgressView      *_progressView;
-    UILabel             *_tipsLbl;
-    
-    NSInteger           _mediaItemCount;
-    NSInteger           _failItemCount;
-}
+
+@property (weak, nonatomic) IBOutlet UILabel *msgLabel;
 
 @end
 
 @implementation ViewController
 
-- (void)viewDidLoad
-{
+- (void)viewDidLoad {
     [super viewDidLoad];
     // Do any additional setup after loading the view, typically from a nib.
     
-    self.view.backgroundColor = [UIColor colorWithRed:0xDA / 255.0 green:0xDA / 255.0 blue:0xDA / 255.0 alpha:1];
-    
-    _btn = [UIButton buttonWithType:UIButtonTypeRoundedRect];
-    _btn.frame = CGRectMake(0, 0, 210, 50);
-    _btn.center = CGPointMake(self.view.bounds.size.width / 2, self.view.bounds.size.height - 50);
-    _btn.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-    [_btn setTitle:@"Start Copy to Camera roll" forState:UIControlStateNormal];
-    [_btn addTarget:self action:@selector(copyToSys) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:_btn];
-    
-    _progressView = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
-    _progressView.frame = CGRectMake(self.view.bounds.size.width / 2 - PROGRESS_VIEW_WIDTH / 2,
-                                     self.view.bounds.size.height / 2 - PROGRESS_VIEW_HEIGHT / 2 - 50,
-                                     PROGRESS_VIEW_WIDTH,
-                                     PROGRESS_VIEW_HEIGHT);
-    _progressView.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-    _progressView.trackTintColor = [UIColor grayColor];
-    _progressView.progressTintColor = [UIColor whiteColor];
-    [self.view addSubview:_progressView];
-    
-    _tipsLbl = [[UILabel alloc] initWithFrame:CGRectMake(self.view.bounds.size.width / 2 - TIPS_LBL_WIDHT / 2,
-                                                         _progressView.frame.origin.y + _progressView.frame.size.height + TIPS_LBL_TOP_MARGIN,
-                                                         TIPS_LBL_WIDHT,
-                                                         TIPS_LBL_HEIGHT)];
-    _tipsLbl.font = [UIFont boldSystemFontOfSize:19];
-    _tipsLbl.numberOfLines = 2;
-    _tipsLbl.backgroundColor = [UIColor clearColor];
-    _tipsLbl.textAlignment = NSTextAlignmentCenter;
-    _tipsLbl.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
-    _tipsLbl.text = @"Tap the button to start copy";
-    [self.view addSubview:_tipsLbl];
+    self.msgLabel.text = @"数据加载中";
 }
 
-- (void)didReceiveMemoryWarning
+- (void)viewDidAppear:(BOOL)animated
 {
-    [super didReceiveMemoryWarning];
-    // Dispose of any resources that can be recreated.
+    [super viewDidAppear:animated];
+    
+    [self unzipMediaFile];
 }
 
-- (void)copyToSys
+- (void)unzipMediaFile
 {
-    // disabled copy btn until the copy action finished
-    _btn.enabled = NO;
+    NSString *zipPath = [[NSBundle mainBundle] pathForResource:@"media" ofType:@"zip"];
+    NSString *documentPath = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     
-    SvSaveToUtils *util = [[SvSaveToUtils alloc] init];
-    util.delegate = self;
-    [util saveMediaToCameraRoll];
+    [[NSFileManager defaultManager] removeItemAtPath:documentPath error:nil];
+    
+    self.msgLabel.text = @"开始解压缩…";
+    
+    [SSZipArchive unzipFileAtPath:zipPath toDestination:documentPath progressHandler:^(NSString * _Nonnull entry, unz_file_info zipInfo, long entryNumber, long total) {
+        self.msgLabel.text = [NSString stringWithFormat:@"解压缩进度： %ld / %ld", entryNumber, total];
+    } completionHandler:^(NSString * _Nonnull path, BOOL succeeded, NSError * _Nonnull error) {
+        self.msgLabel.text = @"解压缩完成，准备导入到相册";
+        
+        [[NSFileManager defaultManager] removeItemAtPath:[documentPath stringByAppendingPathComponent:@"__MACOSX"] error:nil];
+        
+        [self enumeratorFilesAtDirPath:documentPath];
+    }];
 }
 
-
-#pragma mark -
-#pragma mark SvSaveToDelegate
-
-- (void)saveToUtilStartCopy:(NSInteger)itemCount
+- (void)enumeratorFilesAtDirPath:(NSString *)dirPath
 {
-    _mediaItemCount = itemCount;
-    _failItemCount  = 0;
-    _tipsLbl.text   = [NSString stringWithFormat:@"Copying %d / %@", 0, @(itemCount)];
-}
-
-- (void)mediaItemCopiedIsSuccess:(BOOL)success
-{
-    static int index = 0;
-    index += 1;         // caculate copied item count
-    NSLog(@"progress %.0f%%", 100*(CGFloat)index / _mediaItemCount);
-    [_progressView setProgress:((CGFloat)index / _mediaItemCount) animated:YES];
+    NSDirectoryEnumerator<NSString *> *dirEnum = [[NSFileManager defaultManager] enumeratorAtPath:dirPath];
     
-    _tipsLbl.text = [NSString stringWithFormat:@"Copying %@ / %@", @(index), @(_mediaItemCount)];
+    NSString *item = nil;
+    NSMutableArray *filesArray = [NSMutableArray array];
     
-    if (!success) {
-        _failItemCount++;
+    while ((item = [dirEnum nextObject]) != nil) {
+        NSArray *components = [item componentsSeparatedByString:@"/"];
+        
+        if (components.count == 2 && ![components.lastObject isEqualToString:@".DS_Store"]) {
+            [filesArray addObject:item];
+        }
     }
+    
+    [self importFilesToAlbum:filesArray index:0 dir:dirPath];
 }
 
-- (void)savetoUtilCopyFinished
+- (void)importFilesToAlbum:(NSArray *)filesArray index:(int)index dir:(NSString *)dirPath
 {
-    [_progressView setProgress:1 animated:YES];
-    _tipsLbl.text = [NSString stringWithFormat:@"%@\r success: %@, failed: %@", @"Copy finished", @(_mediaItemCount - _failItemCount), @(_failItemCount)];
+    if (index >= filesArray.count) {
+        self.msgLabel.text = @"所有照片都已导入到相册";
+        return;
+    }
     
-    _btn.enabled = YES;
+    NSString *filePath = [filesArray objectAtIndex:index];
+    NSArray *components = [filePath componentsSeparatedByString:@"/"];
+    filePath = [dirPath stringByAppendingPathComponent:filePath];
+    
+    self.msgLabel.text = [NSString stringWithFormat:@"正在导入照片： %zd / %zd", index+1, filesArray.count];
+    
+    if (NSClassFromString(@"PHPhotoLibrary")) {
+        [PHPhotoLibrary writeImageFromFilePath:filePath toAlbum:[components firstObject] completionHandler:^(PHAsset *asset, NSError *error) {
+            [self importFilesToAlbum:filesArray index:index+1 dir:dirPath];
+        }];
+    }
+    else {
+        UIImage *image = [UIImage imageWithContentsOfFile:filePath];
+        [ALAssetsLibrary writeImage:image toAlbum:[components firstObject] completionHandler:^(ALAsset *asset, NSError *error) {
+            [self importFilesToAlbum:filesArray index:index+1 dir:dirPath];
+        }];
+    }
 }
 
 @end
